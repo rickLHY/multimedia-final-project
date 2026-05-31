@@ -16,8 +16,9 @@ class SoundSynthesizer {
   private speakVersion = 0;
   private contextReadyCallbacks: Array<() => void> = [];
 
-  // Pre-fetched PCM chunks, keyed by cleaned text
+  // In-memory cache (session) + localStorage persistence across reloads
   private audioCache = new Map<string, string[]>();
+  private static readonly LS_PREFIX = 'tts_v1_';
 
   /** Set by the consumer to receive loading state updates for the play button. */
   public onLoadingChange: ((loading: boolean) => void) | null = null;
@@ -81,6 +82,43 @@ class SoundSynthesizer {
     try { return __GEMINI_API_KEY__ ?? ''; } catch { return ''; }
   }
 
+  // ── Persistent cache (localStorage) ─────────────────────────────────────────
+
+  private cacheKey(text: string): string {
+    // Simple djb2 hash — short enough for an LS key
+    let h = 5381;
+    for (let i = 0; i < text.length; i++) h = (Math.imul(h, 33) ^ text.charCodeAt(i)) >>> 0;
+    return SoundSynthesizer.LS_PREFIX + h.toString(36);
+  }
+
+  private lsRead(text: string): string[] | null {
+    try {
+      const raw = localStorage.getItem(this.cacheKey(text));
+      return raw ? (JSON.parse(raw) as string[]) : null;
+    } catch { return null; }
+  }
+
+  private lsWrite(text: string, chunks: string[]) {
+    try {
+      localStorage.setItem(this.cacheKey(text), JSON.stringify(chunks));
+    } catch { /* storage quota exceeded — silently skip */ }
+  }
+
+  private fromCache(text: string): string[] | null {
+    // 1. in-memory (fastest)
+    const mem = this.audioCache.get(text);
+    if (mem) return mem;
+    // 2. localStorage (survives page reload)
+    const stored = this.lsRead(text);
+    if (stored) { this.audioCache.set(text, stored); return stored; }
+    return null;
+  }
+
+  private toCache(text: string, chunks: string[]) {
+    this.audioCache.set(text, chunks);
+    this.lsWrite(text, chunks);
+  }
+
   private getGemini(apiKey: string): GoogleGenAI {
     if (!this.geminiClient) this.geminiClient = new GoogleGenAI({ apiKey });
     return this.geminiClient;
@@ -136,21 +174,24 @@ class SoundSynthesizer {
   /** Call on step / mode change. Downloads audio silently so playNarration() is instant. */
   public prefetch(text: string): void {
     const cleaned = this.cleanText(text);
+    // Hit localStorage first — if already cached, no API call needed
+    if (this.fromCache(cleaned)) return;
+
     const apiKey = this.getApiKey();
-    if (!apiKey || this.audioCache.has(cleaned)) return;
+    if (!apiKey) return;
 
     const chunks = this.splitChunks(cleaned);
     this.fetchAllInBackground(chunks, apiKey, cleaned);
   }
 
-  private async fetchAllInBackground(chunks: string[], apiKey: string, cacheKey: string) {
+  private async fetchAllInBackground(chunks: string[], apiKey: string, text: string) {
     const results: string[] = [];
     try {
       for (const chunk of chunks) {
         results.push(await this.fetchAudio(chunk, apiKey));
       }
-      this.audioCache.set(cacheKey, results);
-      console.log(`[TTS] Cached: "${cacheKey.slice(0, 20)}…"`);
+      this.toCache(text, results);
+      console.log(`[TTS] Cached (localStorage): "${text.slice(0, 30)}…"`);
     } catch (err) {
       console.warn('[TTS] prefetch failed:', err);
     }
@@ -170,7 +211,7 @@ class SoundSynthesizer {
     const apiKey = this.getApiKey();
     if (!apiKey) return;
 
-    const cached = this.audioCache.get(cleaned);
+    const cached = this.fromCache(cleaned);
     if (cached) {
       this.playFromCache(cached, version);
     } else {
