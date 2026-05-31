@@ -11,7 +11,7 @@ import StepGuideSidebar, { GUIDE } from '../components/StepGuideSidebar';
 import BalanceSheetViz from '../components/BalanceSheetViz';
 import {
   Volume2, VolumeX, RotateCcw, AlertOctagon,
-  Settings, BookOpen, Sliders, ArrowRight, HelpCircle,
+  Settings, BookOpen, Sliders, ArrowRight,
 } from 'lucide-react';
 
 interface Props {
@@ -242,88 +242,154 @@ export default function SimulatorPage({ mode, multimediaMode }: Props) {
           <div className="flex-1 min-h-0 overflow-hidden">
 
             {step === 1 ? (
-              /* ── STEP 1: Account matrix ── */
-              <div className="h-full bg-[#18181B] border border-[#27272A] rounded-2xl p-5 flex flex-col gap-4">
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="w-2 h-2 rounded-full bg-[#22C55E]" />
-                  <h3 className="font-semibold text-[#FAFAFA] text-sm">資金結構 Account Matrix</h3>
+              /* ── STEP 1: Account matrix + formula comparison ── */
+              <div className="h-full grid grid-cols-2 gap-3 overflow-hidden">
+
+                {/* Left: Account Matrix */}
+                <div className="flex flex-col gap-3 overflow-hidden">
+                  <div className="flex-1 bg-[#18181B] border border-[#27272A] rounded-2xl p-4 flex flex-col gap-3 overflow-y-auto">
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="w-2 h-2 rounded-full bg-[#22C55E]" />
+                      <h3 className="font-semibold text-[#FAFAFA] text-xs">資金結構 Account Matrix</h3>
+                    </div>
+                    {isBuy ? (
+                      <>
+                        <div className="bg-[#09090B] p-3 rounded-xl border border-[#27272A]">
+                          <div className="text-[10px] text-[#A1A1AA] mb-1">股票初始總市值</div>
+                          <div className="text-lg font-mono font-black text-[#FAFAFA]">${(buyParams.shares * buyParams.initialPrice).toLocaleString()}</div>
+                          <div className="text-[9px] text-[#A1A1AA]">{buyParams.shares.toLocaleString()} 股 × ${buyParams.initialPrice}</div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="bg-[#09090B] p-2.5 rounded-xl border border-[#27272A]">
+                            <div className="text-[9px] text-[#22C55E] font-bold mb-0.5">自備款</div>
+                            <div className="text-xs font-bold font-mono text-[#FAFAFA]">${((buyParams.shares * buyParams.initialPrice) * 0.5).toLocaleString()}</div>
+                            <div className="text-[9px] text-[#A1A1AA]">50% IMR</div>
+                          </div>
+                          <div className="bg-[#09090B] p-2.5 rounded-xl border border-[#27272A]">
+                            <div className="text-[9px] text-blue-400 font-bold mb-0.5">借款 Loan</div>
+                            <div className="text-xs font-bold font-mono text-[#FAFAFA]">${((buyParams.shares * buyParams.initialPrice) * 0.5).toLocaleString()}</div>
+                            <div className="text-[9px] text-[#A1A1AA]">50% 融資</div>
+                          </div>
+                        </div>
+                        <div className="h-2 rounded-full overflow-hidden flex">
+                          <div className="bg-[#22C55E] h-full w-1/2" />
+                          <div className="bg-blue-500 h-full w-1/2" />
+                        </div>
+                        {buyParams.extraCash > 0 && (
+                          <div className="bg-[#09090B] p-2.5 rounded-xl border border-indigo-500/30 flex justify-between text-[10px]">
+                            <span className="text-[#A1A1AA]">額外補注現金</span>
+                            <span className="font-mono font-bold text-indigo-400">+${buyParams.extraCash.toLocaleString()}</span>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <div className="bg-[#09090B] p-3 rounded-xl border border-[#27272A]">
+                          <div className="text-[10px] text-[#A1A1AA] mb-1">賣出借入股票總得額</div>
+                          <div className="text-lg font-mono font-black text-[#FAFAFA]">${(shortParams.shares * shortParams.initialPrice).toLocaleString()}</div>
+                          <div className="text-[9px] text-[#A1A1AA]">{shortParams.shares.toLocaleString()} 股 × ${shortParams.initialPrice}</div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="bg-[#09090B] p-2.5 rounded-xl border border-[#27272A]">
+                            <div className="text-[9px] text-[#22C55E] font-bold mb-0.5">自籌保證金</div>
+                            <div className="text-xs font-bold font-mono text-[#FAFAFA]">${((shortParams.shares * shortParams.initialPrice) * 0.5).toLocaleString()}</div>
+                            <div className="text-[9px] text-[#A1A1AA]">50% IMR</div>
+                          </div>
+                          <div className="bg-[#09090B] p-2.5 rounded-xl border border-[#27272A]">
+                            <div className="text-[9px] text-[#A1A1AA] font-semibold mb-0.5">融券所得</div>
+                            <div className="text-xs font-bold font-mono text-[#FAFAFA]">${(shortParams.shares * shortParams.initialPrice).toLocaleString()}</div>
+                            <div className="text-[9px] text-[#A1A1AA]">存留經紀商</div>
+                          </div>
+                        </div>
+                        <div className="bg-[#09090B] p-2.5 rounded-xl border border-indigo-500/30 flex justify-between items-center">
+                          <div>
+                            <div className="text-[9px] text-[#A1A1AA] font-bold">總保證金餘額</div>
+                            <div className="text-sm font-mono font-black text-[#FAFAFA]">${((shortParams.shares * shortParams.initialPrice) * 1.5).toLocaleString()}</div>
+                          </div>
+                          <div className="text-[9px] text-[#A1A1AA] text-right">放空所得<br />+ 自備保證金</div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <button onClick={() => setStep(2)}
+                    className="shrink-0 w-full h-9 bg-[#22C55E] hover:bg-[#16a34a] text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer">
+                    開啟動態沙盒模擬 <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
                 </div>
 
-                {isBuy ? (
-                  <div className="flex flex-col gap-3 flex-1 min-h-0 overflow-y-auto">
-                    <div className="bg-[#09090B] p-4 rounded-xl border border-[#27272A]">
-                      <div className="text-[10px] text-[#A1A1AA] mb-1">股票初始總市值</div>
-                      <div className="text-xl font-mono font-black text-[#FAFAFA]">${(buyParams.shares * buyParams.initialPrice).toLocaleString()}</div>
-                      <div className="text-[10px] text-[#A1A1AA]">{buyParams.shares.toLocaleString()} 股 × ${buyParams.initialPrice}</div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="bg-[#09090B] p-3 rounded-xl border border-[#27272A]">
-                        <div className="text-[10px] text-[#22C55E] font-bold mb-1">自備款 (Cash)</div>
-                        <div className="text-sm font-bold font-mono text-[#FAFAFA]">${((buyParams.shares * buyParams.initialPrice) * 0.5).toLocaleString()}</div>
-                        <div className="text-[9px] text-[#A1A1AA]">50% IMR</div>
-                      </div>
-                      <div className="bg-[#09090B] p-3 rounded-xl border border-[#27272A]">
-                        <div className="text-[10px] text-blue-400 font-bold mb-1">借款金額 (Loan)</div>
-                        <div className="text-sm font-bold font-mono text-[#FAFAFA]">${((buyParams.shares * buyParams.initialPrice) * 0.5).toLocaleString()}</div>
-                        <div className="text-[9px] text-[#A1A1AA]">50% 融資</div>
-                      </div>
-                    </div>
-                    <div className="h-2 rounded-full overflow-hidden flex">
-                      <div className="bg-[#22C55E] h-full w-1/2" />
-                      <div className="bg-blue-500 h-full w-1/2" />
-                    </div>
-                    {buyParams.extraCash > 0 && (
-                      <div className="bg-[#09090B] p-3 rounded-xl border border-indigo-500/30 flex justify-between text-xs">
-                        <span className="text-[#A1A1AA]">額外補注現金</span>
-                        <span className="font-mono font-bold text-indigo-400">+${buyParams.extraCash.toLocaleString()}</span>
-                      </div>
-                    )}
-                    <div className="p-3 bg-[#09090B] border border-[#27272A] rounded-xl text-[10px] text-[#A1A1AA] leading-relaxed">
-                      <span className="font-bold text-[#FAFAFA] flex items-center gap-1 mb-1">
-                        <HelpCircle className="w-3 h-3 text-[#22C55E]" /> 為什麼要 MMR？
-                      </span>
-                      交易所規定的維持保證金比率（MMR）是保護經紀商免於倒債的安全底線。股價下跌時，借款固定、權益縮水，一旦比率跌破 MMR 即觸發追繳。
-                    </div>
+                {/* Right: Formula comparison — both modes side by side */}
+                <div className="bg-[#18181B] border border-[#27272A] rounded-2xl p-4 flex flex-col gap-3 overflow-y-auto">
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="w-2 h-2 rounded-full bg-indigo-400" />
+                    <h3 className="font-semibold text-[#FAFAFA] text-xs">公式對照 Formula Reference</h3>
                   </div>
-                ) : (
-                  <div className="flex flex-col gap-3 flex-1 min-h-0 overflow-y-auto">
-                    <div className="bg-[#09090B] p-4 rounded-xl border border-[#27272A]">
-                      <div className="text-[10px] text-[#A1A1AA] mb-1">賣出借入股票總得額</div>
-                      <div className="text-xl font-mono font-black text-[#FAFAFA]">${(shortParams.shares * shortParams.initialPrice).toLocaleString()}</div>
-                      <div className="text-[10px] text-[#A1A1AA]">{shortParams.shares.toLocaleString()} 股 × ${shortParams.initialPrice}</div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="bg-[#09090B] p-3 rounded-xl border border-[#27272A]">
-                        <div className="text-[10px] text-[#22C55E] font-bold mb-1">自籌保證金</div>
-                        <div className="text-sm font-bold font-mono text-[#FAFAFA]">${((shortParams.shares * shortParams.initialPrice) * 0.5).toLocaleString()}</div>
-                        <div className="text-[9px] text-[#A1A1AA]">50% IMR</div>
-                      </div>
-                      <div className="bg-[#09090B] p-3 rounded-xl border border-[#27272A]">
-                        <div className="text-[10px] text-[#A1A1AA] font-semibold mb-1">融券所得</div>
-                        <div className="text-sm font-bold font-mono text-[#FAFAFA]">${(shortParams.shares * shortParams.initialPrice).toLocaleString()}</div>
-                        <div className="text-[9px] text-[#A1A1AA]">存留經紀商</div>
-                      </div>
-                    </div>
-                    <div className="bg-[#09090B] p-3 rounded-xl border border-indigo-500/30 flex justify-between items-center">
-                      <div>
-                        <div className="text-[10px] text-[#A1A1AA] font-bold">總保證金餘額</div>
-                        <div className="text-base font-mono font-black text-[#FAFAFA]">${((shortParams.shares * shortParams.initialPrice) * 1.5).toLocaleString()}</div>
-                      </div>
-                      <div className="text-[9px] text-[#A1A1AA] text-right leading-relaxed">放空所得<br />+ 自備保證金</div>
-                    </div>
-                    <div className="p-3 bg-[#09090B] border border-[#27272A] rounded-xl text-[10px] text-[#A1A1AA] leading-relaxed">
-                      <span className="font-bold text-[#FAFAFA] flex items-center gap-1 mb-1">
-                        <HelpCircle className="w-3 h-3 text-[#22C55E]" /> 軋空的風險
-                      </span>
-                      股價暴漲時，回補市值激增、融券權益快速蒸發。一旦比率低於 MMR，將面臨強制追繳甚至代為回補（斷頭）。
-                    </div>
-                  </div>
-                )}
 
-                <button onClick={() => setStep(2)}
-                  className="shrink-0 w-full h-10 bg-[#22C55E] hover:bg-[#16a34a] text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer">
-                  開啟動態沙盒模擬 <ArrowRight className="w-3.5 h-3.5" />
-                </button>
+                  {/* ── Margin Buy formulas ── */}
+                  <div className="flex flex-col gap-1.5">
+                    <div className="text-[9px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-400 inline-block" /> 融資購買 (Margin Buy)
+                    </div>
+                    {/* F1: Equity */}
+                    <div className="bg-[#09090B] p-2.5 rounded-xl border border-[#27272A]">
+                      <div className="text-[9px] text-[#A1A1AA] mb-0.5">① 帳戶權益 (Equity)</div>
+                      <div className="text-[10px] font-mono text-[#FAFAFA] font-semibold">= 股票市值 − 借款金額</div>
+                      <div className="text-[9px] font-mono text-[#22C55E] mt-1">
+                        = ${calculatedBuy.itemMarketValue.toLocaleString(undefined,{maximumFractionDigits:0})} − ${calculatedBuy.loanAmount.toLocaleString(undefined,{maximumFractionDigits:0})}
+                        <span className={calculatedBuy.equity >= 0 ? ' text-[#22C55E]' : ' text-rose-400'}> = ${calculatedBuy.equity.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                      </div>
+                    </div>
+                    {/* F2: Margin Ratio */}
+                    <div className="bg-[#09090B] p-2.5 rounded-xl border border-[#27272A]">
+                      <div className="text-[9px] text-[#A1A1AA] mb-0.5">② 保證金成數 ≥ MMR</div>
+                      <div className="text-[10px] font-mono text-[#FAFAFA] font-semibold">= 帳戶權益 ÷ 股票市值</div>
+                      <div className={`text-[9px] font-mono mt-1 ${calculatedBuy.isMarginCall ? 'text-rose-400' : 'text-[#22C55E]'}`}>
+                        = {(calculatedBuy.marginRatio * 100).toFixed(1)}% {calculatedBuy.isMarginCall ? '<' : '≥'} MMR {(buyParams.mmr * 100).toFixed(0)}%
+                      </div>
+                    </div>
+                    {/* F3: Margin Call Price */}
+                    <div className="bg-[#EF4444]/5 p-2.5 rounded-xl border border-[#EF4444]/20">
+                      <div className="text-[9px] text-rose-400 mb-0.5">③ 追繳臨界價</div>
+                      <div className="text-[10px] font-mono text-[#FAFAFA] font-semibold">≤ 借款 ÷ (1 − MMR) ÷ 股數</div>
+                      <div className="text-[9px] font-mono text-rose-400 mt-1">
+                        = ${calculatedBuy.marginCallPrice.toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-[#27272A]" />
+
+                  {/* ── Short Sale formulas ── */}
+                  <div className="flex flex-col gap-1.5">
+                    <div className="text-[9px] font-bold text-orange-400 uppercase tracking-wider flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-orange-400 inline-block" /> 融券放空 (Short Sale)
+                    </div>
+                    {/* F1: Equity */}
+                    <div className="bg-[#09090B] p-2.5 rounded-xl border border-[#27272A]">
+                      <div className="text-[9px] text-[#A1A1AA] mb-0.5">① 融券權益 (Equity)</div>
+                      <div className="text-[10px] font-mono text-[#FAFAFA] font-semibold">= 保證金餘額 − 回補市值</div>
+                      <div className="text-[9px] font-mono text-[#22C55E] mt-1">
+                        = ${calculatedShort.totalMarginBalance.toLocaleString(undefined,{maximumFractionDigits:0})} − ${calculatedShort.itemMarketValue.toLocaleString(undefined,{maximumFractionDigits:0})}
+                        <span className={calculatedShort.equity >= 0 ? ' text-[#22C55E]' : ' text-rose-400'}> = ${calculatedShort.equity.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                      </div>
+                    </div>
+                    {/* F2: Margin Ratio */}
+                    <div className="bg-[#09090B] p-2.5 rounded-xl border border-[#27272A]">
+                      <div className="text-[9px] text-[#A1A1AA] mb-0.5">② 保證金成數 ≥ MMR</div>
+                      <div className="text-[10px] font-mono text-[#FAFAFA] font-semibold">= 融券權益 ÷ 回補市值</div>
+                      <div className={`text-[9px] font-mono mt-1 ${calculatedShort.isMarginCall ? 'text-rose-400' : 'text-[#22C55E]'}`}>
+                        = {(calculatedShort.marginRatio * 100).toFixed(1)}% {calculatedShort.isMarginCall ? '<' : '≥'} MMR {(shortParams.mmr * 100).toFixed(0)}%
+                      </div>
+                    </div>
+                    {/* F3: Margin Call Price */}
+                    <div className="bg-[#EF4444]/5 p-2.5 rounded-xl border border-[#EF4444]/20">
+                      <div className="text-[9px] text-rose-400 mb-0.5">③ 追繳臨界價</div>
+                      <div className="text-[10px] font-mono text-[#FAFAFA] font-semibold">≥ 保證金餘額 ÷ (1 + MMR) ÷ 股數</div>
+                      <div className="text-[9px] font-mono text-rose-400 mt-1">
+                        = ${calculatedShort.marginCallPrice.toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
             ) : (
