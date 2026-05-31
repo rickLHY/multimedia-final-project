@@ -1,0 +1,6 @@
+{
+  "name": "Margin Trading Simulator",
+  "description": "An interactive educational simulator for Buying on Margin and Short Selling, featuring real-time financial models, visual warning animations, and synthesized audio alerts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
