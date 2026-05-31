@@ -11,35 +11,45 @@ export interface MarginBuyParams {
   symbol: string;
   shares: number;
   initialPrice: number;
-  imr: number; // Initial Margin Requirement (e.g. 0.50)
-  mmr: number; // Maintenance Margin Requirement (e.g. 0.40)
-  extraCash: number; // 額外現金
+  imr: number;           // Initial Margin Requirement (e.g. 0.50)
+  mmr: number;           // Maintenance Margin Requirement (e.g. 0.40)
+  extraCash: number;
   simulatedPrice: number;
+  annualRate: number;    // 融資年利率 (e.g. 0.065 = 6.5%)
+  daysHeld: number;      // 持有天數
+  dividendPerShare: number; // 每股現金股利
 }
 
 export interface ShortSaleParams {
   symbol: string;
   shares: number;
   initialPrice: number;
-  imr: number; // Initial Margin Requirement (e.g. 0.50)
-  mmr: number; // Maintenance Margin Requirement (e.g. 0.40)
+  imr: number;
+  mmr: number;
   simulatedPrice: number;
+  annualBorrowRate: number; // 借券年費率 (e.g. 0.03 = 3%)
+  daysShorted: number;      // 放空持有天數
+  dividendPerShare: number; // 每股股利（需補償出借方）
 }
 
 export interface CalculatedBuyState {
-  itemMarketValue: number; // 當前股票總市值
-  loanAmount: number; // 借款金額
-  equity: number; // 帳戶權益
-  marginRatio: number; // 當前保證金成數 (帳戶權益 / 股票市值)
-  marginCallPrice: number; // 觸發追繳的股價門檻
-  isMarginCall: boolean; // 是否觸發追繳
+  itemMarketValue: number;
+  loanAmount: number;
+  equity: number;
+  marginRatio: number;
+  marginCallPrice: number;
+  isMarginCall: boolean;
+  accruedInterest: number;  // 累計利息費用
+  dividendIncome: number;   // 股利收入
 }
 
 export interface CalculatedShortState {
-  itemMarketValue: number; // 當前買回股票市值
-  totalMarginBalance: number; // 總保證金帳戶餘額
-  equity: number; // 融券權益
-  marginRatio: number; // 當前保證金成數 (融券權益 / 股票市值)
-  marginCallPrice: number; // 觸發追繳的股價門檻
-  isMarginCall: boolean; // 是否觸發追繳
+  itemMarketValue: number;
+  totalMarginBalance: number;
+  equity: number;
+  marginRatio: number;
+  marginCallPrice: number;
+  isMarginCall: boolean;
+  borrowingFee: number;  // 累計借券費用
+  dividendOwed: number;  // 需補償出借方股利
 }

@@ -25,14 +25,19 @@ export default function SimulatorPage({ mode, multimediaMode }: Props) {
   const [hadMarginCall, setHadMarginCall] = useState(false);
   const [isSpeakLoading, setIsSpeakLoading] = useState(false);
 
-  const [buyParams, setBuyParams] = useState<MarginBuyParams>({
+  const defaultBuy: MarginBuyParams = {
     symbol: '', shares: 1000, initialPrice: 100,
     imr: 0.50, mmr: 0.40, extraCash: 0, simulatedPrice: 100,
-  });
-  const [shortParams, setShortParams] = useState<ShortSaleParams>({
+    annualRate: 0.065, daysHeld: 0, dividendPerShare: 0,
+  };
+  const defaultShort: ShortSaleParams = {
     symbol: '', shares: 1000, initialPrice: 100,
     imr: 0.50, mmr: 0.40, simulatedPrice: 100,
-  });
+    annualBorrowRate: 0.03, daysShorted: 0, dividendPerShare: 0,
+  };
+
+  const [buyParams, setBuyParams] = useState<MarginBuyParams>(defaultBuy);
+  const [shortParams, setShortParams] = useState<ShortSaleParams>(defaultShort);
 
   useEffect(() => {
     setStep(1);
@@ -44,22 +49,36 @@ export default function SimulatorPage({ mode, multimediaMode }: Props) {
     const itemMarketValue = buyParams.shares * buyParams.simulatedPrice;
     const initialTotalValue = buyParams.shares * buyParams.initialPrice;
     const loanAmount = initialTotalValue * (1 - buyParams.imr);
-    const equity = itemMarketValue - loanAmount + buyParams.extraCash;
+    // Interest accrued on loan
+    const accruedInterest = loanAmount * buyParams.annualRate / 365 * buyParams.daysHeld;
+    // Cash dividends received while holding
+    const dividendIncome = buyParams.shares * buyParams.dividendPerShare;
+    const equity = itemMarketValue - loanAmount + buyParams.extraCash + dividendIncome - accruedInterest;
     const marginRatio = itemMarketValue > 0 ? equity / itemMarketValue : 0;
-    const marginCallValue = (loanAmount - buyParams.extraCash) / (1 - buyParams.mmr);
+    // Margin call when equity/marketValue < mmr
+    // → marketValue = (loan - extraCash - dividendIncome + accruedInterest) / (1 - mmr)
+    const netLiability = loanAmount - buyParams.extraCash - dividendIncome + accruedInterest;
+    const marginCallValue = netLiability / (1 - buyParams.mmr);
     const marginCallPrice = buyParams.shares > 0 ? marginCallValue / buyParams.shares : 0;
-    return { itemMarketValue, loanAmount, equity, marginRatio, marginCallPrice, isMarginCall: buyParams.simulatedPrice <= marginCallPrice };
+    return { itemMarketValue, loanAmount, equity, marginRatio, marginCallPrice, accruedInterest, dividendIncome, isMarginCall: buyParams.simulatedPrice <= marginCallPrice };
   }, [buyParams]);
 
   const calculatedShort = useMemo<CalculatedShortState>(() => {
     const itemMarketValue = shortParams.shares * shortParams.simulatedPrice;
     const initialTotalValue = shortParams.shares * shortParams.initialPrice;
     const totalMarginBalance = initialTotalValue * (1 + shortParams.imr);
-    const equity = totalMarginBalance - itemMarketValue;
+    // Borrowing fee on initial short value
+    const borrowingFee = initialTotalValue * shortParams.annualBorrowRate / 365 * shortParams.daysShorted;
+    // Dividend owed to stock lender
+    const dividendOwed = shortParams.shares * shortParams.dividendPerShare;
+    const equity = totalMarginBalance - itemMarketValue - dividendOwed - borrowingFee;
     const marginRatio = itemMarketValue > 0 ? equity / itemMarketValue : 0;
-    const marginCallValue = totalMarginBalance / (1 + shortParams.mmr);
+    // Margin call when equity/itemMarketValue < mmr
+    // → itemMarketValue = (totalMarginBalance - dividendOwed - borrowingFee) / (1 + mmr)
+    const adjustedBalance = totalMarginBalance - dividendOwed - borrowingFee;
+    const marginCallValue = adjustedBalance / (1 + shortParams.mmr);
     const marginCallPrice = shortParams.shares > 0 ? marginCallValue / shortParams.shares : 0;
-    return { itemMarketValue, totalMarginBalance, equity, marginRatio, marginCallPrice, isMarginCall: shortParams.simulatedPrice >= marginCallPrice };
+    return { itemMarketValue, totalMarginBalance, equity, marginRatio, marginCallPrice, borrowingFee, dividendOwed, isMarginCall: shortParams.simulatedPrice >= marginCallPrice };
   }, [shortParams]);
 
   const isBuy = mode === 'MARGIN_BUY';
@@ -95,8 +114,8 @@ export default function SimulatorPage({ mode, multimediaMode }: Props) {
   }, [activeMarginCall]);
 
   const resetParams = () => {
-    if (isBuy) setBuyParams({ symbol: '', shares: 1000, initialPrice: 100, imr: 0.50, mmr: 0.40, extraCash: 0, simulatedPrice: 100 });
-    else setShortParams({ symbol: '', shares: 1000, initialPrice: 100, imr: 0.50, mmr: 0.40, simulatedPrice: 100 });
+    if (isBuy) setBuyParams(defaultBuy);
+    else setShortParams(defaultShort);
     setHadMarginCall(false);
     soundSynthesizer.stopAlarm();
   };
@@ -175,6 +194,53 @@ export default function SimulatorPage({ mode, multimediaMode }: Props) {
                       className={`${inp} pl-6`} />
                   </div>
                 </div>
+
+                {/* Interest & Dividend */}
+                <div className="pt-2 border-t border-[#27272A] flex flex-col gap-2">
+                  <span className="text-[9px] font-bold text-amber-400 uppercase tracking-wide">利息 ＆ 股利</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-[#A1A1AA] mb-1">
+                        融資年利率 <span className="text-[#22C55E]">{(buyParams.annualRate * 100).toFixed(1)}%</span>
+                      </label>
+                      <input type="range" min="0.01" max="0.15" step="0.001" value={buyParams.annualRate}
+                        onChange={(e) => setBuyParams({ ...buyParams, annualRate: parseFloat(e.target.value) })}
+                        className="w-full accent-amber-400 cursor-pointer h-2 bg-[#27272A] rounded-lg" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-[#A1A1AA] mb-1">持有天數</label>
+                      <input type="number" step="1" min="0" max="365" value={buyParams.daysHeld}
+                        onChange={(e) => setBuyParams({ ...buyParams, daysHeld: Math.max(0, parseInt(e.target.value) || 0) })}
+                        className={inp} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-[#A1A1AA] mb-1">每股現金股利 $</label>
+                    <input type="number" step="0.1" min="0" value={buyParams.dividendPerShare}
+                      onChange={(e) => setBuyParams({ ...buyParams, dividendPerShare: Math.max(0, parseFloat(e.target.value) || 0) })}
+                      className={`${inp} text-amber-400`} />
+                  </div>
+                  {/* 突發事件按鈕：時間推進 30 天 */}
+                  <button
+                    onClick={() => setBuyParams(p => ({ ...p, daysHeld: p.daysHeld + 30 }))}
+                    className="w-full h-8 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 text-amber-400 text-[10px] font-bold rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    ⏩ 時間推進 +30 天（累積利息）
+                  </button>
+
+                  {(calculatedBuy.accruedInterest > 0 || calculatedBuy.dividendIncome > 0) && (
+                    <div className="grid grid-cols-2 gap-1 text-[9px] font-mono">
+                      <div className="bg-[#09090B] p-1.5 rounded-lg border border-[#27272A]">
+                        <div className="text-rose-400">利息費用</div>
+                        <div className="text-[#FAFAFA]">−${calculatedBuy.accruedInterest.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+                      </div>
+                      <div className="bg-[#09090B] p-1.5 rounded-lg border border-[#27272A]">
+                        <div className="text-[#22C55E]">股利收入</div>
+                        <div className="text-[#FAFAFA]">+${calculatedBuy.dividendIncome.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </>
             ) : (
               <>
@@ -201,6 +267,54 @@ export default function SimulatorPage({ mode, multimediaMode }: Props) {
                   <div className="flex justify-between text-[10px] text-[#52525B] mt-0.5">
                     <span>25%</span><span>50%</span>
                   </div>
+                </div>
+
+                {/* Borrow fee & Dividend */}
+                <div className="pt-2 border-t border-[#27272A] flex flex-col gap-2">
+                  <span className="text-[9px] font-bold text-amber-400 uppercase tracking-wide">借券費 ＆ 股利補償</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-[#A1A1AA] mb-1">
+                        借券年費率 <span className="text-[#22C55E]">{(shortParams.annualBorrowRate * 100).toFixed(1)}%</span>
+                      </label>
+                      <input type="range" min="0.001" max="0.15" step="0.001" value={shortParams.annualBorrowRate}
+                        onChange={(e) => setShortParams({ ...shortParams, annualBorrowRate: parseFloat(e.target.value) })}
+                        className="w-full accent-amber-400 cursor-pointer h-2 bg-[#27272A] rounded-lg" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-[#A1A1AA] mb-1">放空天數</label>
+                      <input type="number" step="1" min="0" max="365" value={shortParams.daysShorted}
+                        onChange={(e) => setShortParams({ ...shortParams, daysShorted: Math.max(0, parseInt(e.target.value) || 0) })}
+                        className={inp} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-[#A1A1AA] mb-1">每股股利補償 $</label>
+                    <input type="number" step="0.1" min="0" value={shortParams.dividendPerShare}
+                      onChange={(e) => setShortParams({ ...shortParams, dividendPerShare: Math.max(0, parseFloat(e.target.value) || 0) })}
+                      className={`${inp} text-amber-400`} />
+                  </div>
+
+                  {/* 突發事件按鈕：公司發放股利 */}
+                  <button
+                    onClick={() => setShortParams(p => ({ ...p, dividendPerShare: p.dividendPerShare + 2 }))}
+                    className="w-full h-8 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 text-amber-400 text-[10px] font-bold rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    ⚡ 突發：公司發放 $2 現金股利
+                  </button>
+
+                  {(calculatedShort.borrowingFee > 0 || calculatedShort.dividendOwed > 0) && (
+                    <div className="grid grid-cols-2 gap-1 text-[9px] font-mono">
+                      <div className="bg-[#09090B] p-1.5 rounded-lg border border-[#27272A]">
+                        <div className="text-rose-400">借券費用</div>
+                        <div className="text-[#FAFAFA]">−${calculatedShort.borrowingFee.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+                      </div>
+                      <div className="bg-[#09090B] p-1.5 rounded-lg border border-[#27272A]">
+                        <div className="text-rose-400">股利補償</div>
+                        <div className="text-[#FAFAFA]">−${calculatedShort.dividendOwed.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </>
             )}
@@ -229,9 +343,12 @@ export default function SimulatorPage({ mode, multimediaMode }: Props) {
                 {isBuy ? (<>
                   <div className="bg-[#09090B] p-2 rounded-lg border border-[#27272A]">
                     <div className="text-[9px] text-[#A1A1AA]">① 帳戶權益</div>
-                    <div className="text-[9px] font-mono text-[#FAFAFA] mt-0.5">= 股票市值 − 借款</div>
+                    <div className="text-[9px] font-mono text-[#FAFAFA] mt-0.5">= 市值 − 借款 + 股利 − 利息</div>
                     <div className={`text-[9px] font-mono mt-0.5 ${calculatedBuy.equity >= 0 ? 'text-[#22C55E]' : 'text-rose-400'}`}>
-                      = ${calculatedBuy.itemMarketValue.toLocaleString(undefined,{maximumFractionDigits:0})} − ${calculatedBuy.loanAmount.toLocaleString(undefined,{maximumFractionDigits:0})} = ${calculatedBuy.equity.toLocaleString(undefined,{maximumFractionDigits:0})}
+                      = ${calculatedBuy.itemMarketValue.toLocaleString(undefined,{maximumFractionDigits:0})} − ${calculatedBuy.loanAmount.toLocaleString(undefined,{maximumFractionDigits:0})}
+                      {calculatedBuy.dividendIncome > 0 && ` +$${calculatedBuy.dividendIncome.toLocaleString(undefined,{maximumFractionDigits:0})}`}
+                      {calculatedBuy.accruedInterest > 0 && ` −$${calculatedBuy.accruedInterest.toLocaleString(undefined,{maximumFractionDigits:0})}`}
+                      {' '}= ${calculatedBuy.equity.toLocaleString(undefined,{maximumFractionDigits:0})}
                     </div>
                   </div>
                   <div className="bg-[#09090B] p-2 rounded-lg border border-[#27272A]">
@@ -243,15 +360,18 @@ export default function SimulatorPage({ mode, multimediaMode }: Props) {
                   </div>
                   <div className="bg-[#EF4444]/5 p-2 rounded-lg border border-[#EF4444]/20">
                     <div className="text-[9px] text-rose-400">③ 追繳臨界價</div>
-                    <div className="text-[9px] font-mono text-[#FAFAFA] mt-0.5">≤ 借款 ÷ (1−MMR) ÷ 股數</div>
+                    <div className="text-[9px] font-mono text-[#FAFAFA] mt-0.5">≤ (借款 − 股利 + 利息) ÷ (1−MMR) ÷ 股數</div>
                     <div className="text-[9px] font-mono text-rose-400 mt-0.5">= ${calculatedBuy.marginCallPrice.toFixed(2)}</div>
                   </div>
                 </>) : (<>
                   <div className="bg-[#09090B] p-2 rounded-lg border border-[#27272A]">
                     <div className="text-[9px] text-[#A1A1AA]">① 融券權益</div>
-                    <div className="text-[9px] font-mono text-[#FAFAFA] mt-0.5">= 保證金餘額 − 回補市值</div>
+                    <div className="text-[9px] font-mono text-[#FAFAFA] mt-0.5">= 保證金餘額 − 回補市值 − 股利 − 借券費</div>
                     <div className={`text-[9px] font-mono mt-0.5 ${calculatedShort.equity >= 0 ? 'text-[#22C55E]' : 'text-rose-400'}`}>
-                      = ${calculatedShort.totalMarginBalance.toLocaleString(undefined,{maximumFractionDigits:0})} − ${calculatedShort.itemMarketValue.toLocaleString(undefined,{maximumFractionDigits:0})} = ${calculatedShort.equity.toLocaleString(undefined,{maximumFractionDigits:0})}
+                      = ${calculatedShort.totalMarginBalance.toLocaleString(undefined,{maximumFractionDigits:0})} − ${calculatedShort.itemMarketValue.toLocaleString(undefined,{maximumFractionDigits:0})}
+                      {calculatedShort.dividendOwed > 0 && ` −$${calculatedShort.dividendOwed.toLocaleString(undefined,{maximumFractionDigits:0})}`}
+                      {calculatedShort.borrowingFee > 0 && ` −$${calculatedShort.borrowingFee.toLocaleString(undefined,{maximumFractionDigits:0})}`}
+                      {' '}= ${calculatedShort.equity.toLocaleString(undefined,{maximumFractionDigits:0})}
                     </div>
                   </div>
                   <div className="bg-[#09090B] p-2 rounded-lg border border-[#27272A]">
@@ -263,7 +383,7 @@ export default function SimulatorPage({ mode, multimediaMode }: Props) {
                   </div>
                   <div className="bg-[#EF4444]/5 p-2 rounded-lg border border-[#EF4444]/20">
                     <div className="text-[9px] text-rose-400">③ 追繳臨界價</div>
-                    <div className="text-[9px] font-mono text-[#FAFAFA] mt-0.5">≥ 保證金餘額 ÷ (1+MMR) ÷ 股數</div>
+                    <div className="text-[9px] font-mono text-[#FAFAFA] mt-0.5">≥ (餘額 − 股利 − 借券費) ÷ (1+MMR) ÷ 股數</div>
                     <div className="text-[9px] font-mono text-rose-400 mt-0.5">= ${calculatedShort.marginCallPrice.toFixed(2)}</div>
                   </div>
                 </>)}
