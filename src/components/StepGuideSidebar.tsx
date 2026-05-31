@@ -10,7 +10,7 @@ interface StepGuideSidebarProps {
   onSpeak: () => void;
 }
 
-const GUIDE = {
+export const GUIDE = {
   MARGIN_BUY: {
     1: {
       title: '融資購買：核心概念',

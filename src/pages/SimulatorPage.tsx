@@ -7,7 +7,7 @@ import {
 } from '../types';
 import { soundSynthesizer } from '../utils/audio';
 import InteractiveChart from '../components/InteractiveChart';
-import StepGuideSidebar from '../components/StepGuideSidebar';
+import StepGuideSidebar, { GUIDE } from '../components/StepGuideSidebar';
 import BalanceSheetViz from '../components/BalanceSheetViz';
 import {
   Volume2, VolumeX, RotateCcw, AlertOctagon,
@@ -66,21 +66,13 @@ export default function SimulatorPage({ mode, multimediaMode }: Props) {
   const activeMarginCall = isBuy ? calculatedBuy.isMarginCall : calculatedShort.isMarginCall;
   const activeMarginCallPrice = isBuy ? calculatedBuy.marginCallPrice : calculatedShort.marginCallPrice;
 
+  // Derive narration text from the same GUIDE content shown in the sidebar
   const stepNarrationText = useMemo(() => {
-    if (isBuy) {
-      if (step === 1) return `融資就是向券商借錢買股票，放大投資部位。你出一半，券商借一半，等於兩倍槓桿。股票市值等於借款加上帳戶權益。股價跌，借款固定不變，虧的全是你的帳戶權益。維持保證金比率，也叫 MMR，是帳戶權益除以股票市值的最低底線，預設百分之四十。跌破 MMR 就追繳，補不上就斷頭。`;
-      return `向左拖動滑桿，模擬股價下跌。藍色借款固定，綠色帳戶權益不斷縮水。槓桿風險就在這裡：虧損全是你的，借款一分不少。保證金成數跌破維持比率，追繳警報啟動。追繳後要補現金、賣股減倉，否則券商強制斷頭。試試把滑桿拉到最左邊。`;
-    }
-    if (step === 1) return `融券就是借股票賣出，等股價跌再買回歸還，賺取差價。賣股所得加上你的保證金，是總保證金帳戶餘額，這個數字固定。融券權益等於總餘額減去回補市值。股價漲，回補成本增加，融券權益縮水。維持保證金比率跌破就追繳。放空最大虧損理論上無限，因為股價沒有天花板。`;
-    return `向右拖動滑桿，模擬股價上漲，也就是軋空走勢。橘色回補成本不斷擴大，把綠色融券權益往角落擠。帳戶餘額固定，股價每漲一點，損失就多一點。保證金成數跌破維持比率，追繳警報啟動。追繳後必須立刻補現金或買回股票，否則被強制平倉。把滑桿推到最右邊，感受軋空的壓力。`;
-  }, [isBuy, step]);
-
-  const warningNarration = useMemo(() => isBuy
-    ? `緊急警報！融資追繳已觸發！當前股價已跌破臨界限額 ${calculatedBuy.marginCallPrice.toFixed(1)} 元。帳戶保證金成數已跌破維持比率。請立刻採取行動：補交保證金，或賣出持股減少借款，否則將面臨強制斷頭！`
-    : `緊急警報！融券追繳已觸發！當前股價已突破回補臨界線 ${calculatedShort.marginCallPrice.toFixed(1)} 元。融券保證金比率已跌破維持要求。請立刻補交資金或買回股票回補，否則券商將強制代為平倉！`,
-  [isBuy, calculatedBuy.marginCallPrice, calculatedShort.marginCallPrice]);
-
-  const audioEnabled = multimediaMode !== 'TEXT_CHART' && !isAudioMuted;
+    const g = GUIDE[mode][step];
+    const nums = ['一', '二', '三', '四', '五', '六'];
+    const stepsText = g.steps.map((s, i) => `第${nums[i]}，${s}`).join('。');
+    return `${g.title}。${g.description}。操作步驟：${stepsText}。`;
+  }, [mode, step]);
 
   // Wire up loading callback for the play button
   useEffect(() => {
