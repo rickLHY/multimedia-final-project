@@ -19,6 +19,9 @@ class SoundSynthesizer {
   // Pre-fetched PCM chunks, keyed by cleaned text
   private audioCache = new Map<string, string[]>();
 
+  /** Set by the consumer to receive loading state updates for the play button. */
+  public onLoadingChange: ((loading: boolean) => void) | null = null;
+
   constructor() {
     if (typeof document !== 'undefined') {
       document.addEventListener('click', () => this.tryResume(), true);
@@ -169,12 +172,12 @@ class SoundSynthesizer {
 
     const cached = this.audioCache.get(cleaned);
     if (cached) {
-      console.log('[TTS] Playing from cache (instant)');
       this.playFromCache(cached, version);
     } else {
-      console.log('[TTS] Cache miss — fetching');
+      // Show loading on the button while fetching
+      this.onLoadingChange?.(true);
       const chunks = this.splitChunks(cleaned);
-      this.fetchAndPlay(chunks, apiKey, version);
+      this.fetchAndPlay(chunks, apiKey, version, () => this.onLoadingChange?.(false));
     }
   }
 
@@ -186,20 +189,29 @@ class SoundSynthesizer {
     }
   }
 
-  private async fetchAndPlay(chunks: string[], apiKey: string, version: number) {
+  private async fetchAndPlay(
+    chunks: string[], apiKey: string, version: number,
+    onFirstReady?: () => void,
+  ) {
+    let signalled = false;
+    const signal = () => { if (!signalled) { signalled = true; onFirstReady?.(); } };
+
     for (const chunk of chunks) {
-      if (version !== this.speakVersion) return;
+      if (version !== this.speakVersion) { signal(); return; }
       try {
         const data = await this.fetchAudio(chunk, apiKey);
-        if (version !== this.speakVersion) return;
+        if (version !== this.speakVersion) { signal(); return; }
+        signal(); // first chunk fetched — stop showing spinner
         await this.waitForContext();
         if (version !== this.speakVersion) return;
         await this.playPCM(data, version);
       } catch (err) {
         console.warn('[TTS] chunk failed:', err);
+        signal();
         return;
       }
     }
+    signal();
   }
 
   /** Stop any playing narration (called by startAlarm and setMute). */

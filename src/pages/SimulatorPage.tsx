@@ -23,6 +23,7 @@ export default function SimulatorPage({ mode, multimediaMode }: Props) {
   const [step, setStep] = useState<1 | 2>(1);
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [hadMarginCall, setHadMarginCall] = useState(false);
+  const [isSpeakLoading, setIsSpeakLoading] = useState(false);
 
   const [buyParams, setBuyParams] = useState<MarginBuyParams>({
     symbol: '', shares: 1000, initialPrice: 100,
@@ -80,6 +81,12 @@ export default function SimulatorPage({ mode, multimediaMode }: Props) {
   [isBuy, calculatedBuy.marginCallPrice, calculatedShort.marginCallPrice]);
 
   const audioEnabled = multimediaMode !== 'TEXT_CHART' && !isAudioMuted;
+
+  // Wire up loading callback for the play button
+  useEffect(() => {
+    soundSynthesizer.onLoadingChange = setIsSpeakLoading;
+    return () => { soundSynthesizer.onLoadingChange = null; };
+  }, []);
 
   // Pre-fetch audio in background when step/mode changes — no auto-play
   useEffect(() => { soundSynthesizer.prefetch(stepNarrationText); }, [stepNarrationText]);
@@ -433,6 +440,7 @@ export default function SimulatorPage({ mode, multimediaMode }: Props) {
             mode={mode}
             step={step}
             multimediaMode={multimediaMode}
+            isLoading={isSpeakLoading}
             onSpeak={() => soundSynthesizer.playNarration(stepNarrationText)}
           />
         </div>

@@ -1,11 +1,12 @@
 import React from 'react';
 import { SimulatorMode, MultimediaMode } from '../types';
-import { BookOpen, Sliders, Volume2, ChevronRight } from 'lucide-react';
+import { BookOpen, Sliders, Volume2, ChevronRight, Loader2 } from 'lucide-react';
 
 interface StepGuideSidebarProps {
   mode: SimulatorMode;
   step: 1 | 2;
   multimediaMode: MultimediaMode;
+  isLoading: boolean;
   onSpeak: () => void;
 }
 
@@ -64,7 +65,7 @@ const GUIDE = {
   },
 } as const;
 
-export default function StepGuideSidebar({ mode, step, multimediaMode, onSpeak }: StepGuideSidebarProps) {
+export default function StepGuideSidebar({ mode, step, multimediaMode, isLoading, onSpeak }: StepGuideSidebarProps) {
   const data = GUIDE[mode][step];
   const showText = multimediaMode !== 'CHART_AUDIO';
   const showAudioBtn = multimediaMode !== 'TEXT_CHART';
@@ -118,10 +119,17 @@ export default function StepGuideSidebar({ mode, step, multimediaMode, onSpeak }
       {showAudioBtn && (
         <button
           onClick={onSpeak}
-          className="mt-1 flex items-center justify-center gap-2 h-9 bg-[#09090B] border border-[#27272A] hover:bg-[#27272A] text-[#FAFAFA] font-semibold rounded-xl text-xs transition cursor-pointer"
+          disabled={isLoading}
+          className={`mt-1 flex items-center justify-center gap-2 h-9 border rounded-xl text-xs font-semibold transition ${
+            isLoading
+              ? 'bg-[#09090B] border-[#27272A] text-[#52525B] cursor-not-allowed'
+              : 'bg-[#09090B] border-[#27272A] hover:bg-[#27272A] text-[#FAFAFA] cursor-pointer'
+          }`}
         >
-          <Volume2 className="w-3.5 h-3.5 text-[#22C55E]" />
-          聽取本步解說
+          {isLoading
+            ? <><Loader2 className="w-3.5 h-3.5 animate-spin text-[#22C55E]" />載入語音中…</>
+            : <><Volume2 className="w-3.5 h-3.5 text-[#22C55E]" />聽取本步解說</>
+          }
         </button>
       )}
     </div>
