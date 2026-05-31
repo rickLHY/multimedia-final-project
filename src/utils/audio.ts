@@ -5,132 +5,154 @@
 
 import { GoogleGenAI } from '@google/genai';
 
-// Injected at build time by vite.config define
 declare const __GEMINI_API_KEY__: string;
 
-// ─────────────────────────────────────────────────────────────────────────────
 class SoundSynthesizer {
   private ctx: AudioContext | null = null;
   private alarmInterval: ReturnType<typeof setInterval> | null = null;
   private isMuted = false;
-
   private geminiClient: GoogleGenAI | null = null;
   private currentSource: AudioBufferSourceNode | null = null;
   private speakVersion = 0;
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor() {}
+  // Promises waiting for AudioContext to reach 'running' state
+  private contextReadyCallbacks: Array<() => void> = [];
 
-  // ── Helpers ──────────────────────────────────────────────────────────────────
-
-  private getApiKey(): string {
-    try { return __GEMINI_API_KEY__ ?? ''; } catch { return ''; }
+  constructor() {
+    if (typeof document !== 'undefined') {
+      // Any user click → resume AudioContext + wake up waiting chunks
+      document.addEventListener('click', () => this.tryResume(), true);
+    }
   }
 
-  private getGemini(apiKey: string): GoogleGenAI {
-    if (!this.geminiClient) this.geminiClient = new GoogleGenAI({ apiKey });
-    return this.geminiClient;
-  }
+  // ── AudioContext helpers ────────────────────────────────────────────────────
 
   private initCtx() {
     if (!this.ctx) {
       const Ctx = window.AudioContext || (window as any).webkitAudioContext;
       if (Ctx) this.ctx = new Ctx();
     }
-    if (this.ctx?.state === 'suspended') this.ctx.resume();
   }
 
-  private stopCurrentSource() {
-    if (this.currentSource) {
-      try { this.currentSource.stop(); } catch { /* already stopped */ }
-      this.currentSource = null;
+  private async tryResume() {
+    if (!this.ctx) this.initCtx();
+    if (this.ctx?.state === 'suspended') {
+      try { await this.ctx.resume(); } catch { return; }
+    }
+    if (this.ctx?.state === 'running') {
+      const cbs = this.contextReadyCallbacks.splice(0);
+      cbs.forEach(cb => cb());
     }
   }
 
-  // ── Public API ────────────────────────────────────────────────────────────────
+  /** Resolves immediately if running, otherwise waits for next user click. */
+  private waitForContext(): Promise<void> {
+    if (this.ctx?.state === 'running') return Promise.resolve();
+    this.initCtx();
+    // AudioContext starts suspended (Chrome autoplay policy); wait for user click
+    return new Promise(resolve => this.contextReadyCallbacks.push(resolve));
+  }
+
+  // ── Public API ──────────────────────────────────────────────────────────────
 
   public setMute(muted: boolean) {
     this.isMuted = muted;
     if (muted) {
       this.stopAlarm();
       this.stopCurrentSource();
-      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     }
   }
 
   public speak(text: string, enabled: boolean): void {
     if (!enabled || this.isMuted) return;
 
-    // Normalize newlines → natural pause punctuation
     const cleaned = text
       .replace(/\n\n+/g, '。')
       .replace(/\n/g, '，')
       .replace(/[ \t]+/g, ' ')
       .trim();
 
-    // Cancel anything currently playing
+    // Cancel any in-flight speech
     this.stopCurrentSource();
-    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    this.contextReadyCallbacks = [];
+    if (this.debounceTimer) clearTimeout(this.debounceTimer);
 
     const version = ++this.speakVersion;
-    const apiKey = this.getApiKey();
 
-    if (apiKey) {
-      console.log('[TTS] Using Gemini TTS');
-      this.speakGemini(cleaned, apiKey, version).catch(err => {
-        console.warn('[TTS] Gemini TTS failed:', err);
-      });
-    } else {
-      console.warn('[TTS] No GEMINI_API_KEY found — audio disabled');
+    // 100 ms debounce — fast enough to feel responsive
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = null;
+      if (version !== this.speakVersion) return;
+
+      const apiKey = this.getApiKey();
+      if (!apiKey) { console.warn('[TTS] No GEMINI_API_KEY'); return; }
+
+      const chunks = this.splitChunks(cleaned);
+      console.log(`[TTS] ${chunks.length} chunks`);
+      this.fetchAndPlay(chunks, apiKey, version);
+    }, 100);
+  }
+
+  // ── Chunking ────────────────────────────────────────────────────────────────
+
+  /** Split text into ~45-char sentence chunks for low-latency first audio. */
+  private splitChunks(text: string): string[] {
+    const parts = text.split(/(?<=[。！？])\s*/);
+    const chunks: string[] = [];
+    let buf = '';
+    for (const p of parts) {
+      if (!p.trim()) continue;
+      buf += p;
+      if (buf.length >= 45) { chunks.push(buf.trim()); buf = ''; }
+    }
+    if (buf.trim()) chunks.push(buf.trim());
+    return chunks.length ? chunks : [text.trim()];
+  }
+
+  /** Fetch each chunk from Gemini and play them sequentially. */
+  private async fetchAndPlay(chunks: string[], apiKey: string, version: number) {
+    for (const chunk of chunks) {
+      if (version !== this.speakVersion) return;
+      try {
+        const data = await this.fetchAudio(chunk, apiKey);
+        if (version !== this.speakVersion) return;
+
+        // If AudioContext not running yet (no user gesture), block here
+        // until the user clicks something — then resume automatically.
+        await this.waitForContext();
+        if (version !== this.speakVersion) return;
+
+        await this.playPCM(data, version);
+      } catch (err) {
+        console.warn('[TTS] chunk failed:', err);
+        return;
+      }
     }
   }
 
-  private async speakGemini(text: string, apiKey: string, version: number) {
-    this.initCtx();
-    if (!this.ctx) throw new Error('No AudioContext');
-
+  private async fetchAudio(text: string, apiKey: string): Promise<string> {
     const ai = this.getGemini(apiKey);
-
-    let response;
-    try {
-      // Try the dedicated TTS model first (highest quality)
-      response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-preview-tts',
-        contents: [{ role: 'user', parts: [{ text }] }],
-        config: {
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
-          },
-        } as any,
-      });
-    } catch {
-      // Fall back to gemini-2.0-flash-exp if the TTS model isn't available
-      response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash-exp',
-        contents: [{ role: 'user', parts: [{ text }] }],
-        config: {
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
-          },
-        } as any,
-      });
-    }
-
-    if (version !== this.speakVersion) return;
-
-    const inlineData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
-    const b64 = inlineData?.data;
-    if (!b64) throw new Error('Gemini response contained no audio data');
-
-    console.log('[TTS] Gemini audio received, playing...');
-    await this.playPCM(b64, version);
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-preview-tts',
+      contents: [{ role: 'user', parts: [{ text }] }],
+      config: {
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
+        },
+      } as any,
+    });
+    const b64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (!b64) throw new Error('No audio in Gemini response');
+    return b64;
   }
 
-  private async playPCM(base64: string, version: number) {
-    if (!this.ctx || version !== this.speakVersion) return;
+  // ── PCM playback ────────────────────────────────────────────────────────────
 
-    // Gemini returns 16-bit signed PCM @ 24 kHz, mono, little-endian
+  private async playPCM(base64: string, version: number): Promise<void> {
+    if (version !== this.speakVersion || !this.ctx) return;
+
     const raw = atob(base64);
     const bytes = new Uint8Array(raw.length);
     for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
@@ -145,13 +167,31 @@ class SoundSynthesizer {
     source.connect(this.ctx.destination);
     this.currentSource = source;
 
-    return new Promise<void>(resolve => {
+    return new Promise(resolve => {
       source.onended = () => { this.currentSource = null; resolve(); };
       source.start();
     });
   }
 
-  // ── Alarm beep ────────────────────────────────────────────────────────────────
+  private stopCurrentSource() {
+    if (this.currentSource) {
+      try { this.currentSource.stop(); } catch { /* already stopped */ }
+      this.currentSource = null;
+    }
+  }
+
+  // ── Helpers ─────────────────────────────────────────────────────────────────
+
+  private getApiKey(): string {
+    try { return __GEMINI_API_KEY__ ?? ''; } catch { return ''; }
+  }
+
+  private getGemini(apiKey: string): GoogleGenAI {
+    if (!this.geminiClient) this.geminiClient = new GoogleGenAI({ apiKey });
+    return this.geminiClient;
+  }
+
+  // ── Alarm beep ───────────────────────────────────────────────────────────────
 
   public playWarningBeep() {
     if (this.isMuted) return;
@@ -181,7 +221,6 @@ class SoundSynthesizer {
   public stopAlarm() {
     if (this.alarmInterval) { clearInterval(this.alarmInterval); this.alarmInterval = null; }
     this.stopCurrentSource();
-    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
   }
 }
 
