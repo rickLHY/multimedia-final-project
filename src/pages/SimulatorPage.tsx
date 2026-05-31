@@ -81,18 +81,19 @@ export default function SimulatorPage({ mode, multimediaMode }: Props) {
 
   const audioEnabled = multimediaMode !== 'TEXT_CHART' && !isAudioMuted;
 
-  useEffect(() => { soundSynthesizer.speak(stepNarrationText, audioEnabled); }, [stepNarrationText, audioEnabled]);
+  // Pre-fetch audio in background when step/mode changes — no auto-play
+  useEffect(() => { soundSynthesizer.prefetch(stepNarrationText); }, [stepNarrationText]);
   useEffect(() => { soundSynthesizer.setMute(isAudioMuted); }, [isAudioMuted]);
   useEffect(() => {
     if (activeMarginCall) {
-      soundSynthesizer.startAlarm();
-      if (!hadMarginCall) { soundSynthesizer.speak(warningNarration, audioEnabled); setHadMarginCall(true); }
+      soundSynthesizer.startAlarm(); // startAlarm stops any narration first
+      if (!hadMarginCall) setHadMarginCall(true);
     } else {
       soundSynthesizer.stopAlarm();
       setHadMarginCall(false);
     }
     return () => { soundSynthesizer.stopAlarm(); };
-  }, [activeMarginCall, audioEnabled, warningNarration]);
+  }, [activeMarginCall]);
 
   const resetParams = () => {
     if (isBuy) setBuyParams({ symbol: '', shares: 1000, initialPrice: 100, imr: 0.50, mmr: 0.40, extraCash: 0, simulatedPrice: 100 });
@@ -432,7 +433,7 @@ export default function SimulatorPage({ mode, multimediaMode }: Props) {
             mode={mode}
             step={step}
             multimediaMode={multimediaMode}
-            onSpeak={() => soundSynthesizer.speak(stepNarrationText, true)}
+            onSpeak={() => soundSynthesizer.playNarration(stepNarrationText)}
           />
         </div>
 

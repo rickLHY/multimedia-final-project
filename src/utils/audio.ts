@@ -14,19 +14,18 @@ class SoundSynthesizer {
   private geminiClient: GoogleGenAI | null = null;
   private currentSource: AudioBufferSourceNode | null = null;
   private speakVersion = 0;
-  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-  // Promises waiting for AudioContext to reach 'running' state
   private contextReadyCallbacks: Array<() => void> = [];
+
+  // Pre-fetched PCM chunks, keyed by cleaned text
+  private audioCache = new Map<string, string[]>();
 
   constructor() {
     if (typeof document !== 'undefined') {
-      // Any user click → resume AudioContext + wake up waiting chunks
       document.addEventListener('click', () => this.tryResume(), true);
     }
   }
 
-  // ── AudioContext helpers ────────────────────────────────────────────────────
+  // ── AudioContext ────────────────────────────────────────────────────────────
 
   private initCtx() {
     if (!this.ctx) {
@@ -46,57 +45,22 @@ class SoundSynthesizer {
     }
   }
 
-  /** Resolves immediately if running, otherwise waits for next user click. */
   private waitForContext(): Promise<void> {
     if (this.ctx?.state === 'running') return Promise.resolve();
     this.initCtx();
-    // AudioContext starts suspended (Chrome autoplay policy); wait for user click
     return new Promise(resolve => this.contextReadyCallbacks.push(resolve));
   }
 
-  // ── Public API ──────────────────────────────────────────────────────────────
+  // ── Helpers ─────────────────────────────────────────────────────────────────
 
-  public setMute(muted: boolean) {
-    this.isMuted = muted;
-    if (muted) {
-      this.stopAlarm();
-      this.stopCurrentSource();
-    }
-  }
-
-  public speak(text: string, enabled: boolean): void {
-    if (!enabled || this.isMuted) return;
-
-    const cleaned = text
+  private cleanText(text: string): string {
+    return text
       .replace(/\n\n+/g, '。')
       .replace(/\n/g, '，')
       .replace(/[ \t]+/g, ' ')
       .trim();
-
-    // Cancel any in-flight speech
-    this.stopCurrentSource();
-    this.contextReadyCallbacks = [];
-    if (this.debounceTimer) clearTimeout(this.debounceTimer);
-
-    const version = ++this.speakVersion;
-
-    // 100 ms debounce — fast enough to feel responsive
-    this.debounceTimer = setTimeout(() => {
-      this.debounceTimer = null;
-      if (version !== this.speakVersion) return;
-
-      const apiKey = this.getApiKey();
-      if (!apiKey) { console.warn('[TTS] No GEMINI_API_KEY'); return; }
-
-      const chunks = this.splitChunks(cleaned);
-      console.log(`[TTS] ${chunks.length} chunks`);
-      this.fetchAndPlay(chunks, apiKey, version);
-    }, 100);
   }
 
-  // ── Chunking ────────────────────────────────────────────────────────────────
-
-  /** Split text into ~45-char sentence chunks for low-latency first audio. */
   private splitChunks(text: string): string[] {
     const parts = text.split(/(?<=[。！？])\s*/);
     const chunks: string[] = [];
@@ -110,25 +74,13 @@ class SoundSynthesizer {
     return chunks.length ? chunks : [text.trim()];
   }
 
-  /** Fetch each chunk from Gemini and play them sequentially. */
-  private async fetchAndPlay(chunks: string[], apiKey: string, version: number) {
-    for (const chunk of chunks) {
-      if (version !== this.speakVersion) return;
-      try {
-        const data = await this.fetchAudio(chunk, apiKey);
-        if (version !== this.speakVersion) return;
+  private getApiKey(): string {
+    try { return __GEMINI_API_KEY__ ?? ''; } catch { return ''; }
+  }
 
-        // If AudioContext not running yet (no user gesture), block here
-        // until the user clicks something — then resume automatically.
-        await this.waitForContext();
-        if (version !== this.speakVersion) return;
-
-        await this.playPCM(data, version);
-      } catch (err) {
-        console.warn('[TTS] chunk failed:', err);
-        return;
-      }
-    }
+  private getGemini(apiKey: string): GoogleGenAI {
+    if (!this.geminiClient) this.geminiClient = new GoogleGenAI({ apiKey });
+    return this.geminiClient;
   }
 
   private async fetchAudio(text: string, apiKey: string): Promise<string> {
@@ -138,17 +90,13 @@ class SoundSynthesizer {
       contents: [{ role: 'user', parts: [{ text }] }],
       config: {
         responseModalities: ['AUDIO'],
-        speechConfig: {
-          voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
-        },
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
       } as any,
     });
     const b64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!b64) throw new Error('No audio in Gemini response');
+    if (!b64) throw new Error('No audio in response');
     return b64;
   }
-
-  // ── PCM playback ────────────────────────────────────────────────────────────
 
   private async playPCM(base64: string, version: number): Promise<void> {
     if (version !== this.speakVersion || !this.ctx) return;
@@ -180,15 +128,92 @@ class SoundSynthesizer {
     }
   }
 
-  // ── Helpers ─────────────────────────────────────────────────────────────────
+  // ── Pre-fetch (background, no playback) ─────────────────────────────────────
 
-  private getApiKey(): string {
-    try { return __GEMINI_API_KEY__ ?? ''; } catch { return ''; }
+  /** Call on step / mode change. Downloads audio silently so playNarration() is instant. */
+  public prefetch(text: string): void {
+    const cleaned = this.cleanText(text);
+    const apiKey = this.getApiKey();
+    if (!apiKey || this.audioCache.has(cleaned)) return;
+
+    const chunks = this.splitChunks(cleaned);
+    this.fetchAllInBackground(chunks, apiKey, cleaned);
   }
 
-  private getGemini(apiKey: string): GoogleGenAI {
-    if (!this.geminiClient) this.geminiClient = new GoogleGenAI({ apiKey });
-    return this.geminiClient;
+  private async fetchAllInBackground(chunks: string[], apiKey: string, cacheKey: string) {
+    const results: string[] = [];
+    try {
+      for (const chunk of chunks) {
+        results.push(await this.fetchAudio(chunk, apiKey));
+      }
+      this.audioCache.set(cacheKey, results);
+      console.log(`[TTS] Cached: "${cacheKey.slice(0, 20)}…"`);
+    } catch (err) {
+      console.warn('[TTS] prefetch failed:', err);
+    }
+  }
+
+  // ── Play narration on demand ─────────────────────────────────────────────────
+
+  /** Play narration when user clicks the button. Uses cache if available. */
+  public playNarration(text: string): void {
+    if (this.isMuted) return;
+
+    const cleaned = this.cleanText(text);
+    this.stopCurrentSource();
+    this.contextReadyCallbacks = [];
+
+    const version = ++this.speakVersion;
+    const apiKey = this.getApiKey();
+    if (!apiKey) return;
+
+    const cached = this.audioCache.get(cleaned);
+    if (cached) {
+      console.log('[TTS] Playing from cache (instant)');
+      this.playFromCache(cached, version);
+    } else {
+      console.log('[TTS] Cache miss — fetching');
+      const chunks = this.splitChunks(cleaned);
+      this.fetchAndPlay(chunks, apiKey, version);
+    }
+  }
+
+  private async playFromCache(chunks: string[], version: number) {
+    await this.waitForContext();
+    for (const data of chunks) {
+      if (version !== this.speakVersion) return;
+      await this.playPCM(data, version);
+    }
+  }
+
+  private async fetchAndPlay(chunks: string[], apiKey: string, version: number) {
+    for (const chunk of chunks) {
+      if (version !== this.speakVersion) return;
+      try {
+        const data = await this.fetchAudio(chunk, apiKey);
+        if (version !== this.speakVersion) return;
+        await this.waitForContext();
+        if (version !== this.speakVersion) return;
+        await this.playPCM(data, version);
+      } catch (err) {
+        console.warn('[TTS] chunk failed:', err);
+        return;
+      }
+    }
+  }
+
+  /** Stop any playing narration (called by startAlarm and setMute). */
+  public stopNarration(): void {
+    this.stopCurrentSource();
+    this.contextReadyCallbacks = [];
+    ++this.speakVersion; // invalidate in-flight fetches
+  }
+
+  // ── Mute ────────────────────────────────────────────────────────────────────
+
+  public setMute(muted: boolean) {
+    this.isMuted = muted;
+    if (muted) { this.stopAlarm(); this.stopNarration(); }
   }
 
   // ── Alarm beep ───────────────────────────────────────────────────────────────
@@ -213,6 +238,7 @@ class SoundSynthesizer {
   }
 
   public startAlarm() {
+    this.stopNarration(); // narration and alarm never overlap
     if (this.isMuted || this.alarmInterval) return;
     this.playWarningBeep();
     this.alarmInterval = setInterval(() => this.playWarningBeep(), 840);
