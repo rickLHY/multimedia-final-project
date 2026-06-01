@@ -199,6 +199,22 @@ class SoundSynthesizer {
 
   // ── Play narration on demand ─────────────────────────────────────────────────
 
+  private async fetchFromServer(text: string): Promise<string[] | null> {
+    try {
+      const res = await fetch('http://localhost:3001/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!res.ok) return null;
+      const data = await res.json() as { chunks: string[] };
+      return data.chunks ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Play narration when user clicks the button. Uses cache if available. */
   public playNarration(text: string): void {
     if (this.isMuted) return;
@@ -208,22 +224,41 @@ class SoundSynthesizer {
     this.contextReadyCallbacks = [];
 
     const version = ++this.speakVersion;
-    const apiKey = this.getApiKey();
-
-    if (!apiKey) {
-      this.fallbackSpeech(cleaned, version);
-      return;
-    }
 
     const cached = this.fromCache(cleaned);
     if (cached) {
       this.playFromCache(cached, version);
-    } else {
-      // Show loading on the button while fetching
-      this.onLoadingChange?.(true);
-      const chunks = this.splitChunks(cleaned);
-      this.fetchAndPlay(chunks, apiKey, version, cleaned, () => this.onLoadingChange?.(false));
+      return;
     }
+
+    this.onLoadingChange?.(true);
+    this.playNarrationAsync(cleaned, version);
+  }
+
+  private async playNarrationAsync(cleaned: string, version: number): Promise<void> {
+    const done = () => this.onLoadingChange?.(false);
+
+    // 1. Try local cache server
+    const serverChunks = await this.fetchFromServer(cleaned);
+    if (version !== this.speakVersion) { done(); return; }
+    if (serverChunks) {
+      this.toCache(cleaned, serverChunks);
+      done();
+      await this.playFromCache(serverChunks, version);
+      return;
+    }
+
+    // 2. Fall back: call Gemini directly if API key is available
+    const apiKey = this.getApiKey();
+    if (apiKey) {
+      const chunks = this.splitChunks(cleaned);
+      await this.fetchAndPlay(chunks, apiKey, version, cleaned, done);
+      return;
+    }
+
+    // 3. Last resort: browser speechSynthesis
+    done();
+    this.fallbackSpeech(cleaned, version);
   }
 
   private fallbackSpeech(text: string, version: number): void {
