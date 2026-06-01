@@ -99,9 +99,7 @@ export default function SimulatorPage({ mode, multimediaMode }: Props) {
     return () => { soundSynthesizer.onLoadingChange = null; };
   }, []);
 
-  // Pre-fetch audio in background when step/mode changes — no auto-play
-  useEffect(() => { soundSynthesizer.prefetch(stepNarrationText); }, [stepNarrationText]);
-  useEffect(() => { soundSynthesizer.setMute(isAudioMuted); }, [isAudioMuted]);
+useEffect(() => { soundSynthesizer.setMute(isAudioMuted); }, [isAudioMuted]);
   useEffect(() => {
     if (activeMarginCall) {
       soundSynthesizer.startAlarm(); // startAlarm stops any narration first
