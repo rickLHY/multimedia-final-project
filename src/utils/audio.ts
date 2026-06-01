@@ -209,7 +209,11 @@ class SoundSynthesizer {
 
     const version = ++this.speakVersion;
     const apiKey = this.getApiKey();
-    if (!apiKey) return;
+
+    if (!apiKey) {
+      this.fallbackSpeech(cleaned, version);
+      return;
+    }
 
     const cached = this.fromCache(cleaned);
     if (cached) {
@@ -218,8 +222,20 @@ class SoundSynthesizer {
       // Show loading on the button while fetching
       this.onLoadingChange?.(true);
       const chunks = this.splitChunks(cleaned);
-      this.fetchAndPlay(chunks, apiKey, version, () => this.onLoadingChange?.(false));
+      this.fetchAndPlay(chunks, apiKey, version, cleaned, () => this.onLoadingChange?.(false));
     }
+  }
+
+  private fallbackSpeech(text: string, version: number): void {
+    if (!window.speechSynthesis || version !== this.speakVersion) return;
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = 'zh-TW';
+    utter.rate = 1.0;
+    const voices = window.speechSynthesis.getVoices();
+    const voice = voices.find(v => v.lang === 'zh-TW') ?? voices.find(v => v.lang.startsWith('zh'));
+    if (voice) utter.voice = voice;
+    window.speechSynthesis.speak(utter);
   }
 
   private async playFromCache(chunks: string[], version: number) {
@@ -231,7 +247,7 @@ class SoundSynthesizer {
   }
 
   private async fetchAndPlay(
-    chunks: string[], apiKey: string, version: number,
+    chunks: string[], apiKey: string, version: number, fullText: string,
     onFirstReady?: () => void,
   ) {
     let signalled = false;
@@ -247,8 +263,9 @@ class SoundSynthesizer {
         if (version !== this.speakVersion) return;
         await this.playPCM(data, version);
       } catch (err) {
-        console.warn('[TTS] chunk failed:', err);
+        console.warn('[TTS] chunk failed, falling back to browser speech:', err);
         signal();
+        this.fallbackSpeech(fullText, version);
         return;
       }
     }
@@ -260,6 +277,7 @@ class SoundSynthesizer {
     this.stopCurrentSource();
     this.contextReadyCallbacks = [];
     ++this.speakVersion; // invalidate in-flight fetches
+    try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
   }
 
   // ── Mute ────────────────────────────────────────────────────────────────────
