@@ -11,6 +11,7 @@ class SoundSynthesizer {
   private ctx: AudioContext | null = null;
   private alarmInterval: ReturnType<typeof setInterval> | null = null;
   private isMuted = false;
+  private geminiQuotaExhausted = false;
   private geminiClient: GoogleGenAI | null = null;
   private currentSource: AudioBufferSourceNode | null = null;
   private speakVersion = 0;
@@ -26,6 +27,10 @@ class SoundSynthesizer {
   constructor() {
     if (typeof document !== 'undefined') {
       document.addEventListener('click', () => this.tryResume(), true);
+    }
+    // Pre-warm browser voices so they're ready when needed
+    if (typeof window !== 'undefined') {
+      window.speechSynthesis?.getVoices();
     }
   }
 
@@ -205,7 +210,7 @@ class SoundSynthesizer {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
-        signal: AbortSignal.timeout(30000),
+        signal: AbortSignal.timeout(3000),
       });
       if (!res.ok) return null;
       const data = await res.json() as { chunks: string[] };
@@ -248,9 +253,9 @@ class SoundSynthesizer {
       return;
     }
 
-    // 2. Fall back: call Gemini directly if API key is available
+    // 2. Fall back: call Gemini directly if API key is available and quota not exhausted
     const apiKey = this.getApiKey();
-    if (apiKey) {
+    if (apiKey && !this.geminiQuotaExhausted) {
       const chunks = this.splitChunks(cleaned);
       await this.fetchAndPlay(chunks, apiKey, version, cleaned, done);
       return;
@@ -264,13 +269,27 @@ class SoundSynthesizer {
   private fallbackSpeech(text: string, version: number): void {
     if (!window.speechSynthesis || version !== this.speakVersion) return;
     window.speechSynthesis.cancel();
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.lang = 'zh-TW';
-    utter.rate = 1.0;
+
+    const speak = () => {
+      if (version !== this.speakVersion) return;
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'zh-TW';
+      utter.rate = 0.95;
+      const voices = window.speechSynthesis.getVoices();
+      const voice = voices.find(v => v.lang === 'zh-TW')
+        ?? voices.find(v => v.lang.startsWith('zh'))
+        ?? null;
+      if (voice) utter.voice = voice;
+      window.speechSynthesis.speak(utter);
+    };
+
     const voices = window.speechSynthesis.getVoices();
-    const voice = voices.find(v => v.lang === 'zh-TW') ?? voices.find(v => v.lang.startsWith('zh'));
-    if (voice) utter.voice = voice;
-    window.speechSynthesis.speak(utter);
+    if (voices.length > 0) {
+      speak();
+    } else {
+      // Voices load asynchronously on first call — wait for the event
+      window.speechSynthesis.addEventListener('voiceschanged', speak, { once: true });
+    }
   }
 
   private async playFromCache(chunks: string[], version: number) {
@@ -297,7 +316,11 @@ class SoundSynthesizer {
         await this.waitForContext();
         if (version !== this.speakVersion) return;
         await this.playPCM(data, version);
-      } catch (err) {
+      } catch (err: any) {
+        // Mark quota as exhausted so future calls skip straight to speechSynthesis
+        if (err?.message?.includes('429') || err?.message?.includes('RESOURCE_EXHAUSTED')) {
+          this.geminiQuotaExhausted = true;
+        }
         console.warn('[TTS] chunk failed, falling back to browser speech:', err);
         signal();
         this.fallbackSpeech(fullText, version);
