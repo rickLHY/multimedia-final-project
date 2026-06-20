@@ -4,9 +4,10 @@
  */
 
 import React from 'react';
-import { Routes, Route, Navigate, useParams } from 'react-router-dom';
-import { Sparkles } from 'lucide-react';
+import { Routes, Route, Navigate, useParams, Link } from 'react-router-dom';
+import { Sparkles, BookOpen } from 'lucide-react';
 import SimulatorPage from './pages/SimulatorPage';
+import SlidesPage from './pages/SlidesPage';
 import { SimulatorMode, MultimediaMode } from './types';
 
 function PageShell() {
@@ -43,6 +44,13 @@ function PageShell() {
 
           {/* Read-only mode indicators — switch via URL only */}
           <div className="flex items-center gap-2">
+            <Link
+              to={`/slides/${mediaMode ?? 'full'}`}
+              className="flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg bg-[#09090B] text-[#A1A1AA] border border-[#27272A] hover:text-[#FAFAFA] hover:border-[#52525B] transition-colors"
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              課程簡報
+            </Link>
             <span className="px-3 py-1 text-xs font-bold rounded-lg bg-[#22C55E]/10 text-[#22C55E] border border-[#22C55E]/20">
               {mode === 'MARGIN_BUY' ? '融資購買' : '融券賣出'}
             </span>
@@ -62,6 +70,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/margin-buy/full" replace />} />
+      <Route path="/slides" element={<Navigate to="/slides/full" replace />} />
+      <Route path="/slides/:mediaMode" element={<SlidesPage />} />
       <Route path="/:tradeMode/:mediaMode" element={<PageShell />} />
       <Route path="/:tradeMode" element={<Navigate to="full" replace />} />
     </Routes>
